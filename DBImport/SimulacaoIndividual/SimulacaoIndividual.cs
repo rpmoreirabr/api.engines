@@ -3,8 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Threading.Tasks;
-using Api.Engines.Venda.Infra;
+using Api.Engines.Venda.SimulacaoIndividual.Contratos.Request;
 using Microsoft.Azure.Documents.Client;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
@@ -15,134 +14,76 @@ namespace Api.Engines.Venda.SimulacaoIndividual
 {
     public static class SimulacaoIndividual
     {
-        public class ParametrosSimulacao
-        {
-            public string Sexo { get; set; }
-            public string SexoConjuge { get; set; }
-            public DateTime Nascimento { get; set; }
-            public string Ocupacao { get; set; }
-            public string Estado { get; set; }
-            public Decimal Renda { get; set; }
-            public short Periodicidade { get; set; }
-            public short PrazoDecrescimo { get; set; }
-            public short IdadePgtoAntecipado { get; set; }
-            public short TempoPrazoAntecipado { get; set; }
-            public short PrazoCerto { get; set; }           
-            public DateTime NascimentoConj { get; set; }
-
-            public string RelacaoSegurado { get; set; }
-        }
-
         [FunctionName("SimulacaoIndividual")]
         public static HttpResponseMessage Run(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = "SimulacaoIndividual/{ModeloProposta}/{Documento:long}")]HttpRequestMessage req,
-            string ModeloProposta,
-            long Documento,           
-            [DocumentDB("Venda", "TabelasVenda", Id = "id")] DocumentClient tabelasVenda,            
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = "SimulacaoIndividual")]HttpRequestMessage req,
             [DocumentDB("Venda", "ModelosNegocio", Id = "id")] DocumentClient modelosNegocio,
             [DocumentDB("Venda", "Profissoes", Id = "id")] DocumentClient profissoes,
+            [DocumentDB("Venda", "Simulacoes")] IAsyncCollector<dynamic> simulacoes,
             TraceWriter log)
         {
             var parametros = PreencherParametros(req);
 
             var modeloProposta = modelosNegocio.CreateDocumentQuery<Model.ModeloPropostaCompleto>(UriFactory.CreateDocumentCollectionUri("Venda", "ModelosNegocio")
-                , $"SELECT VALUE m FROM c JOIN m IN c.Modelos WHERE m.Id = '{ModeloProposta}'")
+                , $"SELECT VALUE m FROM c JOIN m IN c.Modelos WHERE m.Id = '{parametros.Contratacao.ModeloProposta}'")
                 .ToList()
                 .FirstOrDefault();
 
             var profissao = profissoes.CreateDocumentQuery<Profissao>(UriFactory.CreateDocumentCollectionUri("Venda", "Profissoes"),
-                $"SELECT * FROM c WHERE c.Cbo = '{parametros.Ocupacao}'").ToList().FirstOrDefault();
+                $"SELECT * FROM c WHERE c.Cbo = '{parametros.Proponente.Profissao}'").ToList().FirstOrDefault();
 
 
             var resultado = new ServicoSimulacao().ObterRegrasContratacao(modeloProposta,
-                Documento,
-                parametros.Nascimento,
-                parametros.Sexo == "F" ? Model.Enum.SexoEnum.Feminino : Model.Enum.SexoEnum.Masculino,                
-                parametros.Estado,
+                parametros.Proponente.Documento.GetValueOrDefault(),
+                parametros.Proponente.DataNascimento.GetValueOrDefault(),
+                parametros.Proponente.Sexo.ToLower() == "feminino" ? Model.Enum.SexoEnum.Feminino : Model.Enum.SexoEnum.Masculino,
+                parametros.Proponente.Estado,
                 profissao,
-                parametros.Periodicidade,
-                parametros.SexoConjuge == "M" ? Model.Enum.SexoEnum.Masculino : Model.Enum.SexoEnum.Feminino,
-                parametros.NascimentoConj,
-                parametros.PrazoCerto,
-                parametros.TempoPrazoAntecipado,
-                parametros.IdadePgtoAntecipado,
-                parametros.PrazoDecrescimo,
-                String.IsNullOrEmpty(parametros.RelacaoSegurado) ? Model.Enum.TipoRelacaoSegurado.Titular : (Model.Enum.TipoRelacaoSegurado) Enum.Parse(typeof(Model.Enum.TipoRelacaoSegurado), parametros.RelacaoSegurado),                
-                parametros.Renda);
+                parametros.Contratacao.Parametros.Find(Parametro.IsPeriodicidade)?.Valor ?? 0,
+                parametros.Conjuge.Sexo.ToLower() == "masculino" ? Model.Enum.SexoEnum.Masculino : Model.Enum.SexoEnum.Feminino,
+                parametros.Conjuge.DataNascimento.GetValueOrDefault(),
+                parametros.Contratacao.Parametros.Find(Parametro.IsPrazoCerto)?.Valor ?? 0,
+                parametros.Contratacao.Parametros.Find(Parametro.IsTempoPrazoAntecipado)?.Valor ?? 0,
+                parametros.Contratacao.Parametros.Find(Parametro.IsIdadePagamentoAntecipado)?.Valor ?? 0,
+                parametros.Contratacao.Parametros.Find(Parametro.IsPrazoDecrescimo)?.Valor ?? 0,
+                Model.Enum.TipoRelacaoSegurado.Titular,
+                parametros.Proponente.Renda.GetValueOrDefault());
 
-            return req.CreateResponse(HttpStatusCode.OK, resultado);
+            var simulacao = new Contratos.Response.Response()
+            {
+                Request = parametros,
+                Produtos = new List<Contratos.Response.Produto>(resultado.Produtos.Select(p => new Contratos.Response.Produto()
+                {
+                    Id = p.IdProduto,
+                    Descricao = p.Descricao,
+                    Obrigatorio = p.Obrigatorio,
+                    Coberturas = new List<Contratos.Response.Cobertura>(p.CoberturasLimite.Select(c => new Contratos.Response.Cobertura()
+                    {
+                        CapitalBase = c.CapitalBase,
+                        Causa = c.Causa,
+                        Descricao = c.Descricao,
+                        Limite = c.Limite,
+                        Id = c.IdItemProduto,
+                        PremioBase = c.PremioBase,
+                        Obrigatorio = c.Obrigatorio,
+                        TipoCapitalBase = Enum.GetName(typeof(Model.Enum.TipoCapitalBase), c.TipoCapitalBase),
+                        TipoCobertura = c.Tipo?.Descricao,
+                        TipoRelacaoSegurado = c.TipoRelacaoSegurado?.Descricao
+                    }))
+                })),
+                TicketMinimo = resultado.TicketMinimo
+            };
+
+            simulacoes.AddAsync(simulacao);
+
+            return req.CreateResponse(HttpStatusCode.OK, simulacao);
         }
 
-        private static ParametrosSimulacao PreencherParametros(HttpRequestMessage req)
+        private static Request PreencherParametros(HttpRequestMessage req)
         {
-            var sexo = req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "sexo")
-                .FirstOrDefault().Value;
-
-            var sexoConjuge = req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "sexoConj")
-                .FirstOrDefault().Value;
-
-            var nascimento = Convert.ToDateTime(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "nascimento")
-                .FirstOrDefault().Value);
-
-            var ocupacao = req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "ocupacao")
-                .FirstOrDefault().Value;
-
-            var estado = req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "estado")
-                .FirstOrDefault().Value;
-
-            var renda = Convert.ToDecimal(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "renda")
-                .FirstOrDefault().Value);
-
-            var periodicidade = Convert.ToInt16(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "periodicidade")
-                .FirstOrDefault().Value);
-
-            var prazoDecrescimo = Convert.ToInt16(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "prazoDecrescimo")
-                .FirstOrDefault().Value);
-
-            var idadePgtoAntecipado = Convert.ToInt16(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "idadePgtoAntecipado")
-                .FirstOrDefault().Value);
-
-            var tempoPrazoAntecipado = Convert.ToInt16(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "tempoPrazoAntecipado")
-                .FirstOrDefault().Value);
-
-            var prazoCerto = Convert.ToInt16(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "prazoCerto")
-                .FirstOrDefault().Value);        
-
-            var relacaoSegurado = req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "relacaoSegurado")
-                .FirstOrDefault().Value;
-
-            var nascimentoConj = Convert.ToDateTime(req.GetQueryNameValuePairs()
-                .Where(q => q.Key == "nascimentoConj")
-                .FirstOrDefault().Value);
-
-            return new ParametrosSimulacao()
-            {
-                Estado = estado,
-                IdadePgtoAntecipado = idadePgtoAntecipado,
-                Nascimento = nascimento,
-                NascimentoConj = nascimentoConj,
-                Ocupacao = ocupacao,
-                Periodicidade = periodicidade,
-                PrazoCerto = prazoCerto,
-                PrazoDecrescimo = prazoDecrescimo,
-                Renda = renda,
-                Sexo = sexo,
-                SexoConjuge = sexoConjuge,
-                TempoPrazoAntecipado = tempoPrazoAntecipado,
-                RelacaoSegurado = relacaoSegurado
-            };
+            var request = (req.Content.ReadAsAsync(typeof(Request)));
+            request.Wait();
+            return (Request) request.Result;
         }
     }
 }

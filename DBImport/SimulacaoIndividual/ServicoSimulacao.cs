@@ -12,7 +12,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.ServiceModel;
 using System.Threading.Tasks;
-using Contratos = Mongeral.ESB.Produto.Contrato.v2.Dados;
+using Produto = Mongeral.ESB.Produto.Contrato.v2.Dados;
 using ContratosEnum = Mongeral.ESB.Produto.Contrato.v2.Enumerations;
 
 namespace Api.Engines.Venda.SimulacaoIndividual
@@ -26,7 +26,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             DateTime dataNascimentoTitular,
             Model.Enum.SexoEnum sexoTitular,
             string ufTitular,
-            Contratos.Profissao profissaoTitular,
+            Produto.Profissao profissaoTitular,
             short periodicidade,
             Model.Enum.SexoEnum sexoConjuge,
             DateTime dataNascimentoConjuge,
@@ -39,7 +39,6 @@ namespace Api.Engines.Venda.SimulacaoIndividual
         {
             var produtosParaSimulacao = this.ObterProdutosSemRestricoes(modeloProposta.Produtos, tipoRelacaoSegurado, profissaoTitular, dataNascimentoTitular, ufTitular);
             var limitesOperacionais = this.ObterLimitesDisponiveis(modeloProposta.PoliticaAceitacao, cpfTitular, dataNascimentoTitular, ufTitular, profissaoTitular, renda, modeloProposta.Produtos);
-            //var retorno = MontarRegrasContratacao(limitesOperacionais, modeloProposta.Produtos);
             var calculo = CalcularPremioCapitalSemCustoFixo(dataNascimentoTitular, sexoTitular, ufTitular, profissaoTitular.CBO, periodicidade, sexoConjuge, dataNascimentoConjuge, prazoCerto, tempoPrazoAntecipado, idadePagamentoAntecipado, prazoDecrescimo, modeloProposta);
             var retorno = MontarRegrasContratacao(limitesOperacionais, calculo);
 
@@ -60,6 +59,23 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             foreach (var cobertura in produtos.SelectMany(p => p.CoberturasLimite))
             {
                 var lim = limites.Where(l => l.Coberturas.Select(cob => cob.IdItemProduto).Contains(cobertura.IdItemProduto)).FirstOrDefault();
+
+                var cobLim = lim.Coberturas.Find(c => c.IdItemProduto == cobertura.IdItemProduto);
+                cobertura.PremioBase = cobertura.Premio;
+                cobertura.CapitalBase = cobLim.CapitalBase;
+                cobertura.Premio = 0;
+                cobertura.CapitalSegurado = 0;
+                cobertura.TipoCapitalBase = cobLim.TipoCapitalBase;
+                cobertura.Descricao = cobLim.Descricao;
+                cobertura.IdItemProduto = cobLim.IdItemProduto;
+                cobertura.Obrigatorio = cobLim.Obrigatorio;                
+                cobertura.TipoRelacaoSegurado = cobLim.TipoRelacaoSegurado;
+                cobertura.Tipo = cobLim.Tipo;
+                cobertura.TempoPrazoAntecipado = cobLim.TempoPrazoAntecipado;
+                cobertura.PrazoCerto = cobLim.PrazoCerto;
+                cobertura.PrazoDecrescimo = cobLim.PrazoDecrescimo;
+                cobertura.IdadePagamentoAntecipado = cobLim.IdadePagamentoAntecipado;
+                cobertura.CustoFixo = cobLim.CustoFixo;               
                 cobertura.Limite = lim.ValorMaximo;
                 cobertura.Causa = lim.Causa;
             }
@@ -73,9 +89,9 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             long cpf,
             DateTime dataNascimento,
             string uf,
-            Contratos.Profissao profissao,
+            Produto.Profissao profissao,
             decimal renda,
-            List<Produto> produtos)
+            List<Model.Produto> produtos)
         {
             if (politicaAceitacao == null)
             {
@@ -157,9 +173,9 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             return resultado.Valor;
         }
 
-        private List<Produto> ObterProdutosSemRestricoes(List<Produto> produtos, Model.Enum.TipoRelacaoSegurado? tipoRelacaoSegurado, Contratos.Profissao profissaoProponente, DateTime dataNascimento, string uf)
+        private List<Model.Produto> ObterProdutosSemRestricoes(List<Model.Produto> produtos, Model.Enum.TipoRelacaoSegurado? tipoRelacaoSegurado, Produto.Profissao profissaoProponente, DateTime dataNascimento, string uf)
         {
-            var produtosParaSimulacao = new List<Produto>();
+            var produtosParaSimulacao = new List<Model.Produto>();
 
             foreach (var produto in produtos)
             {
@@ -230,7 +246,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
 
         private const int TIPOPROPONENTECONJUGE = 2;
 
-        private bool ProdutoRestrito(Produto produto, Model.Enum.TipoRelacaoSegurado? tipoRelacaoSegurado, Contratos.Profissao profissaoProponente, out string motivo)
+        private bool ProdutoRestrito(Model.Produto produto, Model.Enum.TipoRelacaoSegurado? tipoRelacaoSegurado, Produto.Profissao profissaoProponente, out string motivo)
         {
             motivo = string.Empty;
 
@@ -253,7 +269,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             return false;
         }
 
-        private bool CoberturaRestrita(Model.Cobertura cobertura, DateTime dataNascimento, string uf, Contratos.Profissao profissaoProponente, out string motivo)
+        private bool CoberturaRestrita(Model.Cobertura cobertura, DateTime dataNascimento, string uf, Produto.Profissao profissaoProponente, out string motivo)
         {
             motivo = string.Empty;
 
@@ -288,7 +304,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             return false;
         }
 
-        private LimiteDisponivel CalcularLimiteDisponivel(Limite l, List<CapitalSegurado> capitaisAcumuladosCliente, decimal valorMaximoCapitalSegurado, string tipoLimite, List<Produto> produtos, short prazoCerto = 0)
+        private LimiteDisponivel CalcularLimiteDisponivel(Limite l, List<CapitalSegurado> capitaisAcumuladosCliente, decimal valorMaximoCapitalSegurado, string tipoLimite, List<Model.Produto> produtos, short prazoCerto = 0)
         {
             var capitalAcumulado = ObterCapitalAcumuladoPorCobertura(l, capitaisAcumuladosCliente);
             var valorMaximo = valorMaximoCapitalSegurado - capitalAcumulado;
@@ -389,7 +405,6 @@ namespace Api.Engines.Venda.SimulacaoIndividual
                 EnumTipoCalculoPremioCapital.CalculoComCustoFixo);
         }
 
-        //3a fase 
         private List<ContratacaoProduto> CalcularPremioCapital(DateTime dataNascimentoTitular,
             Model.Enum.SexoEnum sexoTitular,
             string ufTitular,
@@ -405,7 +420,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             EnumTipoCalculoPremioCapital tipoCalculoPremio)
         {
             var coberturasCalculadas = new List<ContratacaoCobertura>();
-            var parametrosCalculo = new List<Contratos.ParametrosCalculo>();
+            var parametrosCalculo = new List<Produto.ParametrosCalculo>();
             var valoresRepasse = new Dictionary<int, decimal>();
             var coberturasNaoExibidas = new List<Model.Cobertura>();
 
@@ -429,7 +444,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             try
             {
                 AbaterValorServicos(valoresRepasse, parametrosCalculo);
-                var resultado = ServiceWcf<ICalculoService>.UseSync(s => s.CalcularValorContribuicaoBeneficio(parametrosCalculo));
+                var resultado =  ServiceWcf<ICalculoService>.UseSync(s => s.CalcularValorContribuicaoBeneficio(parametrosCalculo));
 
                 if (resultado.HouveErrosDuranteProcessamento)
                     throw new CalculoException(string.Join(Environment.NewLine, resultado.Mensagens));
@@ -462,7 +477,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
                 prazoDecrescimo);
         }
 
-        private static List<ContratacaoProduto> RetornarProdutosPreenchidos(List<Produto> produtos, 
+        private static List<ContratacaoProduto> RetornarProdutosPreenchidos(List<Model.Produto> produtos, 
             List<ContratacaoCobertura> coberturasCalculadas, 
             List<Model.Cobertura> coberturasNaoExibidas,
             short prazoCerto,
@@ -517,13 +532,13 @@ namespace Api.Engines.Venda.SimulacaoIndividual
                 cobertura.Premio += valoresRepasse[cobertura.IdItemProduto];
         }
 
-        private void AbaterValorServicos(IDictionary<int, decimal> valoresRepasse, List<Contratos.ParametrosCalculo> parametrosCalculo)
+        private void AbaterValorServicos(IDictionary<int, decimal> valoresRepasse, List<Produto.ParametrosCalculo> parametrosCalculo)
         {
             foreach (var parametro in parametrosCalculo.Where(p => p.ValorPremio > 0 && valoresRepasse.ContainsKey(p.ItemProdutoId)))
                 parametro.ValorPremio -= valoresRepasse[parametro.ItemProdutoId];
         }
 
-        private void AdicionarObservacaoTimeout(List<Contratos.ParametrosCalculo> parametrosCalculo)
+        private void AdicionarObservacaoTimeout(List<Produto.ParametrosCalculo> parametrosCalculo)
         {
             var obs = ObservacaoHelper.PreencherObservacao(6
                 , itens: parametrosCalculo.Select(x => string.Concat("ItemProdutoId: ", x.ItemProdutoId)).ToArray()
@@ -533,7 +548,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             throw new ServicoIndisponivelException(obs);
         }
 
-        private List<Contratos.ParametrosCalculo> GerarParametrosParaCalculo(
+        private List<Produto.ParametrosCalculo> GerarParametrosParaCalculo(
             DateTime dataNascimentoTitular,
             Model.Enum.SexoEnum sexoTitular,
             string ufTitular,
@@ -550,7 +565,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             Dictionary<int, decimal> valoresRepasse,
             List<Model.Cobertura> coberturasNaoExibidas)
         {
-            var retorno = new List<Contratos.ParametrosCalculo>();
+            var retorno = new List<Produto.ParametrosCalculo>();
 
             foreach (var cobertura in produto.Coberturas)
             {
@@ -573,7 +588,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
         private void CalcularRepasse(
             DateTime dataNascimentoTitular,
             Cobertura cobertura,
-            Produto produto,
+            Model.Produto produto,
             ModeloPropostaCompleto modeloProposta,
             Dictionary<int, decimal> valoresRepasse,
             List<Cobertura> coberturasNaoExibidas)
@@ -613,9 +628,9 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             }
         }
 
-        private void AdicionarConjuge(Model.Enum.SexoEnum sexo, DateTime dataNascimento, Contratos.ParametrosCalculo parametroDeCalculo)
+        private void AdicionarConjuge(Model.Enum.SexoEnum sexo, DateTime dataNascimento, Produto.ParametrosCalculo parametroDeCalculo)
         {
-            parametroDeCalculo.Conjuge = new Contratos.Conjuge
+            parametroDeCalculo.Conjuge = new Produto.Conjuge
             {
                 Sexo = (ContratosEnum.SexoEnum) Enum.Parse(typeof(ContratosEnum.SexoEnum), Enum.GetName(typeof(Model.Enum.SexoEnum), sexo)),
                 DataNascimento = dataNascimento
@@ -628,7 +643,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
 
         }      
 
-        private Contratos.ParametrosCalculo CriarParametroDeCalculo(Model.Enum.SexoEnum sexoTitular, 
+        private Produto.ParametrosCalculo CriarParametroDeCalculo(Model.Enum.SexoEnum sexoTitular, 
             DateTime dataNascimentoTitular, 
             string ufTitular, 
             string cboTitular,
@@ -639,12 +654,12 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             short PrazoDecrescimo,
             ModeloPropostaCompleto modeloProposta, 
             Cobertura cobertura, 
-            Produto produto)
+            Model.Produto produto)
         {
             ValidarCobertura(cobertura, produto);
 
             //TODO: Repassar valores de serviços marcados ao cliente
-            return new Contratos.ParametrosCalculo
+            return new Produto.ParametrosCalculo
             {
                 ValorBeneficio = cobertura.CapitalSegurado,
                 ValorPremio = cobertura.Premio,
@@ -652,7 +667,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
                 DataInicioVigencia = DateTime.Now,
                 ItemProdutoId = cobertura.IdEsim.GetValueOrDefault(),
                 PrazoCobertura = ObterPrazoCobertura(PrazoCerto, TempoPrazoAntecipado),
-                Segurado = new Contratos.Segurado { Sexo = (ContratosEnum.SexoEnum) Enum.Parse(typeof(ContratosEnum.SexoEnum), Enum.GetName(typeof(Model.Enum.SexoEnum), sexoTitular)), DataNascimento = dataNascimentoTitular, UF = ufTitular, ProfissaoCBO = cboTitular },
+                Segurado = new Produto.Segurado { Sexo = (ContratosEnum.SexoEnum) Enum.Parse(typeof(ContratosEnum.SexoEnum), Enum.GetName(typeof(Model.Enum.SexoEnum), sexoTitular)), DataNascimento = dataNascimentoTitular, UF = ufTitular, ProfissaoCBO = cboTitular },
                 FormaContratacaoId = ObterFormaContratacaoDoModelo(cobertura.IdEsim.GetValueOrDefault(), modeloProposta),
                 IdentificadorExterno = cobertura.IdEsim.ToString(),
                 PeriodicidadeId = ObterPeriodicidade(periodicidade),
@@ -726,7 +741,7 @@ namespace Api.Engines.Venda.SimulacaoIndividual
             return tipoRenda;
         }
 
-        private void ValidarCobertura(Cobertura cobertura, Produto produto)
+        private void ValidarCobertura(Cobertura cobertura, Model.Produto produto)
         {
             if (cobertura.CapitalSegurado == 0 || cobertura.Premio == 0)
                 return;

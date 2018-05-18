@@ -1,7 +1,6 @@
 ﻿using Api.Engines.Venda.Infra;
 using Api.Engines.Venda.Model;
 using Mongeral.ESB.Produto.Contrato.v2.Dados;
-using Mongeral.ESB.Produto.Contrato.v2.Enumerations;
 using Mongeral.ESB.Produto.Contrato.v2.Operacoes;
 using System;
 using System.Collections.Generic;

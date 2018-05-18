@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace Api.Engines.Venda.Model
+﻿namespace Api.Engines.Venda.Model
 {
     public class LimiteOperacionalFaixaEtaria : Limite
     {
